@@ -229,9 +229,12 @@ class FooocusPreKSampler:
     CATEGORY = "Fooocus"
 
     def fooocus_preKSampler(self, pipe: dict, image_to_latent=None, latent=None, fooocus_inpaint=None, fooocus_styles=None, **kwargs):
-        # 检查pipe非空
+        ### 检查 pipe 参数并开始计时
         assert pipe is not None, "请先调用 FooocusLoader 进行初始化！"
         execution_start_time = time.perf_counter()
+
+        ### 遍历 kwargs 字典，并将除了 switch 和 refiner_switch 之外的所有键值对更新到 pipe 字典中。
+        # 这样做可以动态地调整管道参数，而不必在类定义中硬编码所有可能的参数
         pipe.update(
             {
                 key: value
@@ -239,6 +242,8 @@ class FooocusPreKSampler:
                 if key not in ("switch", "refiner_switch")
             }
         )
+
+        ### 从 pipe 字典中提取正面和负面的文本提示。如果提供了 fooocus_styles 参数（表示风格选择），则使用它；否则，初始化为空列表
         prompt = pipe["positive_prompt"]
         negative_prompt = pipe["negative_prompt"]
         if fooocus_styles is not None:
@@ -246,6 +251,8 @@ class FooocusPreKSampler:
         else:
             style_selections = []
 
+
+        ### 从 pipe 和 kwargs 中提取图像生成所需的关键参数，如图像数量、种子、锐度、指导规模、基础模型名称、细化模型名称、CLIP跳过数和LoRA层
         image_number = pipe["image_number"]
         image_seed = kwargs.get("seed")
         read_wildcards_in_order = False
@@ -269,8 +276,10 @@ class FooocusPreKSampler:
         controlnet_softness = kwargs.pop("controlnet_softness")
         freeu_enabled = kwargs.pop("freeu_enabled")
 
+        # 初始化加载LoRA列表
         base_model_additional_loras = []
 
+        ### 检查是否选择了 fooocus_expansion 风格，如果是，则设置 use_expansion 为 True。根据风格选择的数量决定是否使用风格处理
         if fooocus_expansion in style_selections:
             use_expansion = True
         else:
@@ -281,12 +290,14 @@ class FooocusPreKSampler:
         else:
             use_style = len(style_selections) > 0
 
+        ### 如果基础模型和细化模型相同，则禁用细化模型。调用 pipeline.refresh_everything 方法来刷新和加载所有必要的模型，包括基础模型、细化模型和LoRA层
         if base_model_name == refiner_model_name:
             print(f'Refiner disabled because base model and refiner are same.')
             refiner_model_name = 'None'
 
         steps = kwargs.pop("steps")
 
+        # LCM 模式下会禁用Refiner 以及强制更改采样器和调度器
         if pipe["sampler_name"] == "lcm":
             print('Enter LCM mode.')
             if refiner_model_name != 'None':
@@ -303,6 +314,8 @@ class FooocusPreKSampler:
             modules.patch.negative_adm_scale = 1, 0
             modules.patch.adm_scaler_end = 0.0
         seed = int(image_seed)
+
+        # 打印和设置参数
         print(f'[Parameters] Adaptive CFG = {adaptive_cfg}')
         print(f'[Parameters] CLIP Skip = {clip_skip}')
         print(f'[Parameters] Sharpness = {sharpness}')
@@ -313,6 +326,8 @@ class FooocusPreKSampler:
               f'{adm_scaler_end}')
         print(f'[Parameters] Seed = {seed}')
 
+        # 使用提取的参数创建一个 PatchSettings 实例，并将其存储在 patch_settings 字典中，使用进程 ID pid 作为键。
+        # 这允许在进程范围内持久化这些设置
         patch_settings[pid] = PatchSettings(
             sharpness,
             adm_scaler_end,
